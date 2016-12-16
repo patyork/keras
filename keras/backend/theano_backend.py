@@ -1926,6 +1926,86 @@ def ctc_batch_cost(y_true, y_pred, input_length, label_length):
     return ret
 
 
+def log_add(x, y):
+    larger = T.maximum(x, y)
+    smaller = T.minimum(x, y)
+    return larger + T.log(1 + T.exp(smaller - larger))
+
+
+def ctc_cost2(y_true, y_pred, input_length, label_length):
+    Y_ = T.alloc(27, y_true.shape[0] * 2 + 1 + 2)  # Append 2 extra blanks
+    y_true = T.set_subtensor(Y_[T.arange(y_true.shape[0]) * 2 + 1], y_true)
+
+    prev_mask = T.fvector()
+    prevprev_mask = T.fvector()
+    one_very_hot = T.fvector()
+
+    true_length_with_blanks = T.fvector()
+    true_length_with_blanks = label_length[0] * 2 + 1
+
+    one_very_hot = T.eye(true_length_with_blanks)[0]
+    # one_hot = T.cast(T.eye(label_length[0])[0], 'float32')
+    prev_mask = 1 - one_very_hot
+    prevprev_mask = T.neq(y_true[:-2], y_true[2:]) * T.eq(y_true[1:-1], 27)
+    prevprev_mask = T.concatenate(([0, 0], prevprev_mask))[:true_length_with_blanks]
+
+    prev_maska = 1e-20
+    prev_mask = T.maximum(prev_mask, prev_maska)
+    prev_mask = T.log(prev_mask)
+    prevprev_mask = T.log(T.maximum(T.cast(prevprev_mask, 'float32'), 1e-20))
+    prev = T.arange(-1, true_length_with_blanks - 1)
+    prevprev = T.arange(-2, true_length_with_blanks - 2)
+
+    log_pred_y = (T.log(y_pred[:, y_true]))
+
+    def step(curr, accum):
+        return T.cast(curr[:true_length_with_blanks] + log_add(
+            log_add(accum[:true_length_with_blanks], (prev_mask + accum[:true_length_with_blanks][prev])),
+            (prevprev_mask + accum[prevprev])), 'float32')
+
+    log_probs, _ = theano.scan(
+        step,
+        sequences=[log_pred_y],
+        outputs_info=[T.cast(T.log(T.maximum(one_very_hot, 1e-20)), 'float32')]
+    )
+    return -log_add(log_probs[input_length[0] - 1, true_length_with_blanks - 1],
+                    log_probs[input_length[0] - 1, true_length_with_blanks - 2])
+
+    # return log_probs
+    return -log_labels_probab
+
+
+def ctc_batch_cost2(y_true, y_pred, input_length, label_length):
+    '''Runs CTC loss algorithm on each batch element in log scale.
+
+    # Arguments
+        y_true: tensor (samples, max_string_length) containing the truth labels
+        y_pred: tensor (samples, max_time_steps, num_categories) containing the prediction,
+                or output of the softmax
+        input_length: tensor (samples,1) containing the sequence length for
+                each batch item in y_pred
+        label_length: tensor (samples,1) containing the sequence length for
+                each batch item in y_true
+
+    # Returns
+        Tensor with shape (samples,1) containing the
+            CTC loss of each element
+    '''
+    def ctc_step(y_true_step, y_pred_step, input_length_step, label_length_step):
+        y_pred_step = y_pred_step[0: input_length_step[0]]
+        y_true_step = y_true_step[0: label_length_step[0]]
+        return ctc_cost2(y_true_step, y_pred_step, input_length_step, label_length_step)
+
+    ret, _ = theano.scan(
+        fn=ctc_step,
+        outputs_info=None,
+        sequences=[y_true, y_pred, input_length, label_length]
+    )
+
+    ret = ret.dimshuffle('x', 0)
+    return ret
+
+
 # HIGH ORDER FUNCTIONS
 
 def map_fn(fn, elems, name=None):
