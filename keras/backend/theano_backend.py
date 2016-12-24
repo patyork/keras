@@ -522,7 +522,7 @@ def _old_batch_normalization(x, mean, var, beta, gamma, epsilon=1e-3):
 
     ndim = x.ndim
     dev = theano.config.device
-    use_cudnn = ndim < 5 and (dev.startswith('cuda') or dev.startswith('gpu'))
+    use_cudnn = False #ndim < 5 and (dev.startswith('cuda') or dev.startswith('gpu'))
     if use_cudnn:
         try:
             axis = mean.broadcastable.index(False)
