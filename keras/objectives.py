@@ -1,9 +1,5 @@
 from __future__ import absolute_import
 import numpy as np
-
-def dssim_loss(y_true, y_pred):
-    return K.mean(KE.loss_DSSIM(y_true, y_pred))
-
 from . import backend as K
 from .utils.generic_utils import get_from_module
 
